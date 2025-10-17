@@ -1,100 +1,147 @@
-import base64
-import os
-from tkinter import *
-from tkinter import messagebox
+from flask import Flask, request, render_template_string
 from Crypto.Cipher import AES
-from Crypto.Random import get_random_bytes
+from Crypto.Util.Padding import pad, unpad
+import base64
 
-# -----------------------------
+app = Flask(__name__)
+
+# ==============================
 # AES Functions
-# -----------------------------
-def get_key():
-    key_env = os.environ.get("AES_KEY_B64")
-    if key_env:
-        try:
-            key = base64.b64decode(key_env)
-            if len(key) not in (16, 24, 32):
-                raise ValueError
-            return key
-        except Exception:
-            messagebox.showerror("Error", "Invalid AES_KEY_B64 in environment.")
-            return None
-    else:
-        # Temporary random key (for demo only)
-        return get_random_bytes(32)
+# ==============================
+def aes_encrypt(plaintext, key):
+    cipher = AES.new(key, AES.MODE_CBC)
+    ct_bytes = cipher.encrypt(pad(plaintext.encode(), AES.block_size))
+    iv = base64.b64encode(cipher.iv).decode('utf-8')
+    ct = base64.b64encode(ct_bytes).decode('utf-8')
+    return iv, ct
 
-def encrypt_text():
-    plaintext = encrypt_input.get("1.0", END).strip()
-    if not plaintext:
-        messagebox.showwarning("Warning", "Enter text to encrypt!")
-        return
-    key = get_key()
-    cipher = AES.new(key, AES.MODE_GCM)
-    ciphertext, tag = cipher.encrypt_and_digest(plaintext.encode())
-    data = cipher.nonce + tag + ciphertext
-    encoded = base64.b64encode(data).decode()
-    encrypt_output.delete("1.0", END)
-    encrypt_output.insert(END, encoded)
+def aes_decrypt(iv, ciphertext, key):
+    iv = base64.b64decode(iv)
+    ct = base64.b64decode(ciphertext)
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    pt = unpad(cipher.decrypt(ct), AES.block_size)
+    return pt.decode('utf-8')
 
-def decrypt_text():
-    ciphertext_b64 = decrypt_input.get("1.0", END).strip()
-    if not ciphertext_b64:
-        messagebox.showwarning("Warning", "Enter ciphertext to decrypt!")
-        return
-    try:
-        data = base64.b64decode(ciphertext_b64)
-        nonce, tag, ciphertext = data[:12], data[12:28], data[28:]
-        key = get_key()
-        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
-        plaintext = cipher.decrypt_and_verify(ciphertext, tag)
-        decrypt_output.delete("1.0", END)
-        decrypt_output.insert(END, plaintext.decode(errors="ignore"))
-    except Exception:
-        messagebox.showerror("Error", "Decryption failed! Wrong key or invalid data.")
+# ==============================
+# HTML Template (inline)
+# ==============================
+html_page = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🔐 AES Encryption & Decryption</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #06b6d4, #3b82f6);
+            text-align: center;
+            padding: 40px;
+            color: #fff;
+        }
+        h1 { font-size: 2.2em; margin-bottom: 20px; }
+        form {
+            background: #ffffff;
+            color: #222;
+            padding: 25px;
+            border-radius: 16px;
+            box-shadow: 0px 8px 16px rgba(0,0,0,0.2);
+            display: inline-block;
+            width: 75%;
+            max-width: 650px;
+        }
+        textarea, input {
+            width: 90%;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 10px;
+            border: 1px solid #ccc;
+            font-size: 1em;
+        }
+        button {
+            background: #2563EB;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            margin-top: 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: 0.3s;
+        }
+        button:hover { background: #1E40AF; }
+        .result {
+            background: rgba(255, 255, 255, 0.95);
+            color: #111;
+            margin-top: 25px;
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0px 6px 12px rgba(0,0,0,0.2);
+            text-align: left;
+            width: 75%;
+            max-width: 650px;
+            margin-left: auto;
+            margin-right: auto;
+            word-wrap: break-word;
+        }
+        .result b { color: #2563EB; }
+    </style>
+</head>
+<body>
+    <h1>🔐 AES Encryption & Decryption (CBC Mode)</h1>
+    <form method="POST">
+        <textarea name="plaintext" placeholder="Enter plaintext..." required>{{ plaintext if plaintext else "" }}</textarea><br>
+        <input type="text" name="user_key" placeholder="Enter secret key (16/24/32 bytes)" value="{{ user_key if user_key else '' }}" required><br>
+        <button type="submit">Encrypt & Decrypt</button>
+    </form>
 
-# -----------------------------
-# GUI Layout
-# -----------------------------
-root = Tk()
-root.title("AES Encryption & Decryption GUI")
-root.geometry("900x500")
-root.config(bg="#1e1e1e")
-root.resizable(False, False)
+    {% if error %}
+    <div class="result">
+        <p style="color:red;"><b>Error:</b> {{ error }}</p>
+    </div>
+    {% endif %}
 
-title_label = Label(root, text="AES Encryption / Decryption", font=("Arial", 18, "bold"), fg="#00FFAA", bg="#1e1e1e")
-title_label.pack(pady=10)
+    {% if secret_key %}
+    <div class="result">
+        <p><b>Secret Key (Hex):</b><br>{{ secret_key }}</p>
+        <p><b>Key Length (bits):</b> {{ key_length }}</p>
+        <p><b>Ciphertext (Base64):</b><br>{{ ciphertext }}</p>
+        <p><b>Decrypted Plaintext:</b><br>{{ decrypted_text }}</p>
+    </div>
+    {% endif %}
+</body>
+</html>
+"""
 
-main_frame = Frame(root, bg="#1e1e1e")
-main_frame.pack(pady=10)
+# ==============================
+# Routes
+# ==============================
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if request.method == "POST":
+        plaintext = request.form["plaintext"]
+        user_key = request.form["user_key"].encode()
 
-# ENCRYPTION FRAME
-encrypt_frame = LabelFrame(main_frame, text="Encryption", font=("Arial", 12, "bold"), fg="#00ccff", bg="#2a2a2a", bd=2, padx=10, pady=10)
-encrypt_frame.grid(row=0, column=0, padx=15)
+        # Validate key length
+        if len(user_key) not in (16, 24, 32):
+            return render_template_string(html_page,
+                                          plaintext=plaintext,
+                                          user_key=request.form["user_key"],
+                                          error="❌ Invalid key length! Must be 16, 24, or 32 bytes.")
 
-Label(encrypt_frame, text="Plaintext:", fg="white", bg="#2a2a2a", font=("Arial", 10, "bold")).pack(anchor="w")
-encrypt_input = Text(encrypt_frame, height=6, width=40, wrap=WORD, bg="#252526", fg="white", insertbackground="white")
-encrypt_input.pack(pady=5)
+        iv, ciphertext = aes_encrypt(plaintext, user_key)
+        decrypted_text = aes_decrypt(iv, ciphertext, user_key)
 
-Button(encrypt_frame, text="Encrypt", command=encrypt_text, bg="#0078D7", fg="white", font=("Arial", 12, "bold"), width=15).pack(pady=5)
+        return render_template_string(html_page,
+                                      plaintext=plaintext,
+                                      user_key=request.form["user_key"],
+                                      secret_key=user_key.hex(),
+                                      key_length=len(user_key)*8,
+                                      ciphertext=ciphertext,
+                                      decrypted_text=decrypted_text)
+    return render_template_string(html_page)
 
-Label(encrypt_frame, text="Ciphertext (Base64):", fg="white", bg="#2a2a2a", font=("Arial", 10, "bold")).pack(anchor="w")
-encrypt_output = Text(encrypt_frame, height=6, width=40, wrap=WORD, bg="#252526", fg="white", insertbackground="white")
-encrypt_output.pack(pady=5)
-
-# DECRYPTION FRAME
-decrypt_frame = LabelFrame(main_frame, text="Decryption", font=("Arial", 12, "bold"), fg="#ff9966", bg="#2a2a2a", bd=2, padx=10, pady=10)
-decrypt_frame.grid(row=0, column=1, padx=15)
-
-Label(decrypt_frame, text="Ciphertext (Base64):", fg="white", bg="#2a2a2a", font=("Arial", 10, "bold")).pack(anchor="w")
-decrypt_input = Text(decrypt_frame, height=6, width=40, wrap=WORD, bg="#252526", fg="white", insertbackground="white")
-decrypt_input.pack(pady=5)
-
-Button(decrypt_frame, text="Decrypt", command=decrypt_text, bg="#FF5722", fg="white", font=("Arial", 12, "bold"), width=15).pack(pady=5)
-
-Label(decrypt_frame, text="Plaintext:", fg="white", bg="#2a2a2a", font=("Arial", 10, "bold")).pack(anchor="w")
-decrypt_output = Text(decrypt_frame, height=6, width=40, wrap=WORD, bg="#252526", fg="white", insertbackground="white")
-decrypt_output.pack(pady=5)
-
-Label(root, text="Tip: Set AES_KEY_B64 env var for consistent key across sessions.", fg="gray", bg="#1e1e1e", font=("Arial", 10)).pack(pady=10)
-
-root.mainloop()
+# ==============================
+# Run
+# ==============================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
