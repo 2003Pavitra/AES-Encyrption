@@ -1,91 +1,100 @@
-import os
 import base64
-from flask import Flask, request, jsonify
+import os
+from tkinter import *
+from tkinter import messagebox
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 
-app = Flask(__name__)
+# -----------------------------
+# AES Functions
+# -----------------------------
+def get_key():
+    key_env = os.environ.get("AES_KEY_B64")
+    if key_env:
+        try:
+            key = base64.b64decode(key_env)
+            if len(key) not in (16, 24, 32):
+                raise ValueError
+            return key
+        except Exception:
+            messagebox.showerror("Error", "Invalid AES_KEY_B64 in environment.")
+            return None
+    else:
+        # Temporary random key (for demo only)
+        return get_random_bytes(32)
 
-# --- Load AES Key from Environment ---
-AES_KEY_B64 = os.getenv("AES_KEY_B64")
-if AES_KEY_B64:
-    try:
-        KEY = base64.b64decode(AES_KEY_B64)
-        if len(KEY) not in (16, 24, 32):
-            raise ValueError("Invalid AES key length. Must be 16, 24, or 32 bytes.")
-    except Exception as e:
-        raise RuntimeError("Invalid AES_KEY_B64: " + str(e))
-else:
-    # Temporary key for local testing (not for production!)
-    print("⚠️ AES_KEY_B64 not set — generating a temporary key (do not use in production).")
-    KEY = get_random_bytes(32)
-
-
-# --- Encryption Helper ---
-def aes_encrypt(plaintext: str, aad: str = "") -> str:
-    nonce = get_random_bytes(12)
-    cipher = AES.new(KEY, AES.MODE_GCM, nonce=nonce)
-    if aad:
-        cipher.update(aad.encode())
+def encrypt_text():
+    plaintext = encrypt_input.get("1.0", END).strip()
+    if not plaintext:
+        messagebox.showwarning("Warning", "Enter text to encrypt!")
+        return
+    key = get_key()
+    cipher = AES.new(key, AES.MODE_GCM)
     ciphertext, tag = cipher.encrypt_and_digest(plaintext.encode())
-    combined = nonce + tag + ciphertext
-    return base64.b64encode(combined).decode()
+    data = cipher.nonce + tag + ciphertext
+    encoded = base64.b64encode(data).decode()
+    encrypt_output.delete("1.0", END)
+    encrypt_output.insert(END, encoded)
 
-
-# --- Decryption Helper ---
-def aes_decrypt(ciphertext_b64: str, aad: str = "") -> str:
-    raw = base64.b64decode(ciphertext_b64)
-    if len(raw) < 28:  # 12 nonce + 16 tag = 28 minimum
-        raise ValueError("Ciphertext too short.")
-    nonce, tag, ciphertext = raw[:12], raw[12:28], raw[28:]
-    cipher = AES.new(KEY, AES.MODE_GCM, nonce=nonce)
-    if aad:
-        cipher.update(aad.encode())
-    plaintext = cipher.decrypt_and_verify(ciphertext, tag)
-    return plaintext.decode(errors="ignore")
-
-
-# --- Flask Routes ---
-@app.route("/")
-def home():
-    return (
-        "<h2>AES Encryption/Decryption API</h2>"
-        "<p>Use POST /encrypt or /decrypt</p>"
-        "<p>JSON Example: {'plaintext':'hello world'}</p>"
-    )
-
-
-@app.route("/encrypt", methods=["POST"])
-def encrypt_route():
-    data = request.get_json(force=True, silent=True)
-    if not data or "plaintext" not in data:
-        return jsonify({"error": "Missing 'plaintext' field"}), 400
-
-    plaintext = data["plaintext"]
-    aad = data.get("aad", "")
+def decrypt_text():
+    ciphertext_b64 = decrypt_input.get("1.0", END).strip()
+    if not ciphertext_b64:
+        messagebox.showwarning("Warning", "Enter ciphertext to decrypt!")
+        return
     try:
-        ciphertext = aes_encrypt(plaintext, aad)
-        return jsonify({"ciphertext": ciphertext})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        data = base64.b64decode(ciphertext_b64)
+        nonce, tag, ciphertext = data[:12], data[12:28], data[28:]
+        key = get_key()
+        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+        plaintext = cipher.decrypt_and_verify(ciphertext, tag)
+        decrypt_output.delete("1.0", END)
+        decrypt_output.insert(END, plaintext.decode(errors="ignore"))
+    except Exception:
+        messagebox.showerror("Error", "Decryption failed! Wrong key or invalid data.")
 
+# -----------------------------
+# GUI Layout
+# -----------------------------
+root = Tk()
+root.title("AES Encryption & Decryption GUI")
+root.geometry("900x500")
+root.config(bg="#1e1e1e")
+root.resizable(False, False)
 
-@app.route("/decrypt", methods=["POST"])
-def decrypt_route():
-    data = request.get_json(force=True, silent=True)
-    if not data or "ciphertext" not in data:
-        return jsonify({"error": "Missing 'ciphertext' field"}), 400
+title_label = Label(root, text="AES Encryption / Decryption", font=("Arial", 18, "bold"), fg="#00FFAA", bg="#1e1e1e")
+title_label.pack(pady=10)
 
-    ciphertext = data["ciphertext"]
-    aad = data.get("aad", "")
-    try:
-        plaintext = aes_decrypt(ciphertext, aad)
-        return jsonify({"plaintext": plaintext})
-    except Exception as e:
-        return jsonify({"error": "Decryption failed: " + str(e)}), 400
+main_frame = Frame(root, bg="#1e1e1e")
+main_frame.pack(pady=10)
 
+# ENCRYPTION FRAME
+encrypt_frame = LabelFrame(main_frame, text="Encryption", font=("Arial", 12, "bold"), fg="#00ccff", bg="#2a2a2a", bd=2, padx=10, pady=10)
+encrypt_frame.grid(row=0, column=0, padx=15)
 
-# --- Run the App ---
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+Label(encrypt_frame, text="Plaintext:", fg="white", bg="#2a2a2a", font=("Arial", 10, "bold")).pack(anchor="w")
+encrypt_input = Text(encrypt_frame, height=6, width=40, wrap=WORD, bg="#252526", fg="white", insertbackground="white")
+encrypt_input.pack(pady=5)
+
+Button(encrypt_frame, text="Encrypt", command=encrypt_text, bg="#0078D7", fg="white", font=("Arial", 12, "bold"), width=15).pack(pady=5)
+
+Label(encrypt_frame, text="Ciphertext (Base64):", fg="white", bg="#2a2a2a", font=("Arial", 10, "bold")).pack(anchor="w")
+encrypt_output = Text(encrypt_frame, height=6, width=40, wrap=WORD, bg="#252526", fg="white", insertbackground="white")
+encrypt_output.pack(pady=5)
+
+# DECRYPTION FRAME
+decrypt_frame = LabelFrame(main_frame, text="Decryption", font=("Arial", 12, "bold"), fg="#ff9966", bg="#2a2a2a", bd=2, padx=10, pady=10)
+decrypt_frame.grid(row=0, column=1, padx=15)
+
+Label(decrypt_frame, text="Ciphertext (Base64):", fg="white", bg="#2a2a2a", font=("Arial", 10, "bold")).pack(anchor="w")
+decrypt_input = Text(decrypt_frame, height=6, width=40, wrap=WORD, bg="#252526", fg="white", insertbackground="white")
+decrypt_input.pack(pady=5)
+
+Button(decrypt_frame, text="Decrypt", command=decrypt_text, bg="#FF5722", fg="white", font=("Arial", 12, "bold"), width=15).pack(pady=5)
+
+Label(decrypt_frame, text="Plaintext:", fg="white", bg="#2a2a2a", font=("Arial", 10, "bold")).pack(anchor="w")
+decrypt_output = Text(decrypt_frame, height=6, width=40, wrap=WORD, bg="#252526", fg="white", insertbackground="white")
+decrypt_output.pack(pady=5)
+
+Label(root, text="Tip: Set AES_KEY_B64 env var for consistent key across sessions.", fg="gray", bg="#1e1e1e", font=("Arial", 10)).pack(pady=10)
+
+root.mainloop()
